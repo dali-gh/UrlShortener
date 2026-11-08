@@ -19,6 +19,11 @@ builder.Services.AddStackExchangeRedisCache(options =>
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    scope.ServiceProvider.GetRequiredService<ApiDbContext>().Database.Migrate();
+}
+
 // Configure HTTP pipeline
 if (app.Environment.IsDevelopment())
 {
@@ -64,7 +69,7 @@ app.MapFallback(async (ApiDbContext dbContext, IDistributedCache cache, HttpCont
     var sw = Stopwatch.StartNew();
     var path = ctx.Request.Path.ToUriComponent().Trim('/');
 
-    // 1. جرّب الـ Cache
+    // try to get the original URL from cache first
     var cachedUrl = await cache.GetStringAsync(path);
     if (cachedUrl is not null)
     {
@@ -77,7 +82,7 @@ app.MapFallback(async (ApiDbContext dbContext, IDistributedCache cache, HttpCont
         return Results.Redirect(cachedUrl);
     }
 
-    // 2. Cache miss: اسأل قاعدة البيانات
+    // Cache miss, query the database
     var urlMatch = await dbContext.Urls.FirstOrDefaultAsync(x => x.ShortUrl == path);
     if (urlMatch is null)
     {
@@ -86,7 +91,7 @@ app.MapFallback(async (ApiDbContext dbContext, IDistributedCache cache, HttpCont
         return Results.NotFound("Short URL not found");
     }
 
-    // 3. خزّنه في الـ Cache
+    // Store the result in cache for future requests
     await cache.SetStringAsync(path, urlMatch.Url, new DistributedCacheEntryOptions
     {
         AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
