@@ -21,7 +21,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapPost("/shortner", async (UrlDto url, ApiDbContext dbContext, HttpContext ctx) =>
+app.MapPost("/shorturl", async (UrlDto url, ApiDbContext dbContext, HttpContext ctx) =>
 {
     // Validate the URL
     if (!Uri.TryCreate(url.Url, UriKind.Absolute, out var inputUrl))
@@ -67,7 +67,6 @@ app.MapFallback(async (ApiDbContext dbContext, HttpContext ctx) =>
 
 app.Run();
 
-// virtual allows Entity Framework Core to override this property when using proxy-based features, such as lazy loading.
 class ApiDbContext : DbContext
 {
     public virtual DbSet<UrlManagement> Urls { get; set; } = null!;
