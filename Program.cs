@@ -1,5 +1,7 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using UrlShortner.Models;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,6 +11,11 @@ var ConnectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddDbContext<ApiDbContext>(options => options.UseSqlite(ConnectionString));
+
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+});
 
 var app = builder.Build();
 
@@ -52,14 +59,45 @@ app.MapPost("/shorturl", async (UrlDto url, ApiDbContext dbContext, HttpContext 
     });
 });
 
-app.MapFallback(async (ApiDbContext dbContext, HttpContext ctx) =>
+app.MapFallback(async (ApiDbContext dbContext, IDistributedCache cache, HttpContext ctx, ILogger<Program> logger) =>
 {
+    var sw = Stopwatch.StartNew();
     var path = ctx.Request.Path.ToUriComponent().Trim('/');
-    var urlMatch = await dbContext.Urls.FirstOrDefaultAsync(x =>
-    x.ShortUrl.ToLower().Trim() == path.ToLower().Trim());
 
-    if (urlMatch == null) { return Results.BadRequest("Invalid Request"); }
+    // 1. جرّب الـ Cache
+    var cachedUrl = await cache.GetStringAsync(path);
+    if (cachedUrl is not null)
+    {
+        sw.Stop();
+        ctx.Response.Headers["X-Cache"] = "HIT";
+        ctx.Response.Headers["X-Response-Time-Ms"] = sw.ElapsedMilliseconds.ToString();
+        logger.LogInformation(
+            "✅ CACHE HIT | /{Code} -> {OriginalUrl} | {ElapsedMs} ms",
+            path, cachedUrl, sw.Elapsed.TotalMilliseconds);
+        return Results.Redirect(cachedUrl);
+    }
 
+    // 2. Cache miss: اسأل قاعدة البيانات
+    var urlMatch = await dbContext.Urls.FirstOrDefaultAsync(x => x.ShortUrl == path);
+    if (urlMatch is null)
+    {
+        sw.Stop();
+        logger.LogWarning("⚠️ NOT FOUND | /{Code} | {ElapsedMs} ms", path, sw.Elapsed.TotalMilliseconds);
+        return Results.NotFound("Short URL not found");
+    }
+
+    // 3. خزّنه في الـ Cache
+    await cache.SetStringAsync(path, urlMatch.Url, new DistributedCacheEntryOptions
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
+    });
+
+    sw.Stop();
+    ctx.Response.Headers["X-Cache"] = "MISS";
+    ctx.Response.Headers["X-Response-Time-Ms"] = sw.ElapsedMilliseconds.ToString();
+    logger.LogInformation(
+        "❌ CACHE MISS (DB) | /{Code} -> {OriginalUrl} | {ElapsedMs} ms",
+        path, urlMatch.Url, sw.Elapsed.TotalMilliseconds);
     return Results.Redirect(urlMatch.Url);
 });
 
@@ -72,6 +110,6 @@ class ApiDbContext : DbContext
     public virtual DbSet<UrlManagement> Urls { get; set; } = null!;
     public ApiDbContext(DbContextOptions<ApiDbContext> options) : base(options)
     {
-        
+
     }
 }
