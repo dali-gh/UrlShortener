@@ -1,9 +1,9 @@
 # UrlShortener
 
 ![version](https://img.shields.io/badge/version-1.0.0-blue)
-![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)
+![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)
 ![Redis](https://img.shields.io/badge/cache-Redis-DC382D)
-![CI](https://github.com/USERNAME/UrlShortener/actions/workflows/ci.yml/badge.svg)
+
 
 A lightweight URL shortener API built with **ASP.NET Core Minimal APIs**, **Entity Framework Core**, **SQLite**, and a **Redis cache-aside layer** for fast redirects.
 
